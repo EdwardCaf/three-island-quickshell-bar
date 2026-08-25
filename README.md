@@ -10,8 +10,8 @@ right with a collapsible secondary-status drawer.
 
 - Three independent pill-shaped surfaces on horizontal bars
 - Exact screen-centered clock, unaffected by side-island widths
-- Hover-to-reveal secondary status widgets
-- Click-to-pin status drawer
+- Secondary status widgets visible by default
+- Click-to-collapse status drawer with hover reveal
 - Omarchy `Color` and `Style` tokens instead of hard-coded colors
 - Existing widget panels, tooltips, drag handling, and multi-monitor behavior
 - Continuous-bar fallback for left and right orientations
@@ -41,9 +41,10 @@ merge the `bar` object from [`examples/shell.json`](examples/shell.json) into
 
 ## Status Drawer
 
-The right island always displays entries not listed in `secondaryWidgets`.
-Entries listed there stay mounted but are clipped until the island is hovered
-or pinned open. This preserves panel routing and background refresh behavior.
+The right island starts expanded, so every configured widget is visible.
+Click the `-` control to collapse entries listed in `secondaryWidgets`; hovering
+the island reveals them temporarily. Secondary entries stay mounted while
+collapsed, preserving panel routing and background refresh behavior.
 
 Configure the drawer in the `bar` object:
 

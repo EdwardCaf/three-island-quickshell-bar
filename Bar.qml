@@ -47,7 +47,7 @@ Item {
   property bool transparent: false
   property bool centerSectionHovered: false
   property int statusHoverCount: 0
-  property bool statusPinned: false
+  property bool statusPinned: true
   readonly property bool statusRevealed: statusPinned || statusHoverCount > 0
   readonly property var defaultSecondaryWidgetIds: [
     "omarchy.tray",
