@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.edwardcaf.floating-islands",
+  "name": "Three Island Quickshell Bar",
+  "version": "1.0.0",
+  "author": "Edward Cafarella",
+  "description": "Three adaptive floating islands with a collapsible status drawer",
+  "kinds": [
+    "bar"
+  ],
+  "entryPoints": {
+    "bar": "Bar.qml"
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.bar"
+  }
+}

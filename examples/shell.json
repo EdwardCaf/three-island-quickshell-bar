@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "bar": {
+    "id": "io.github.edwardcaf.floating-islands",
+    "position": "top",
+    "transparent": false,
+    "centerAnchor": "omarchy.clock",
+    "secondaryWidgets": [
+      "omarchy.tray",
+      "omarchy.tailscale",
+      "omarchy.agents",
+      "omarchy.bluetooth",
+      "omarchy.keyboard-layout",
+      "omarchy.weather",
+      "omarchy.system-update",
+      "omarchy.monitor"
+    ],
+    "layout": {
+      "left": [
+        { "id": "omarchy.menu" },
+        { "id": "omarchy.workspaces" },
+        { "id": "omarchy.active-window", "maxWidth": 320 }
+      ],
+      "center": [
+        {
+          "id": "omarchy.clock",
+          "format": "dddd HH:mm",
+          "formatAlt": "d MMMM 'W'ww yyyy"
+        }
+      ],
+      "right": [
+        { "id": "omarchy.tray" },
+        { "id": "omarchy.indicators" },
+        { "id": "omarchy.keyboard-layout" },
+        { "id": "omarchy.weather" },
+        { "id": "omarchy.system-update" },
+        { "id": "omarchy.tailscale" },
+        { "id": "omarchy.agents" },
+        { "id": "omarchy.bluetooth" },
+        { "id": "omarchy.monitor" },
+        { "id": "omarchy.network" },
+        { "id": "omarchy.audio" },
+        { "id": "omarchy.power" }
+      ]
+    }
+  }
+}
