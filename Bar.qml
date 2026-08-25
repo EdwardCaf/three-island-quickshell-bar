@@ -20,6 +20,7 @@ Item {
   // the bar just renders whatever it's handed. The bar font follows the
   // OS-level fontconfig monospace binding — it is not stored in shell.json.
   property var barConfig: ({})
+  property bool hostReady: false
   // Injected by the host shell. Used for shell-wide actions such as opening
   // settings and persisting inline widget state.
   property var shell: null
@@ -617,7 +618,19 @@ Item {
     return source ? Util.fileUrl(source) : ""
   }
 
-  Component.onCompleted: applyBarConfig()
+  function scheduleHostReady() {
+    if (!barWidgetRegistry) return
+    Qt.callLater(function() {
+      if (root && root.barWidgetRegistry) root.hostReady = true
+    })
+  }
+
+  onBarWidgetRegistryChanged: scheduleHostReady()
+
+  Component.onCompleted: {
+    applyBarConfig()
+    scheduleHostReady()
+  }
 
   // Revealing the indicators widens their section, which can slide a neighbour
   // under a stationary pointer. Collapsing on that un-hover would move it back
@@ -987,7 +1000,7 @@ Item {
   }
 
   Variants {
-    model: Quickshell.screens
+    model: root.hostReady ? Quickshell.screens : []
 
     delegate: Component {
       BarPanel {
@@ -999,7 +1012,7 @@ Item {
   }
 
   Variants {
-    model: Quickshell.screens
+    model: root.hostReady ? Quickshell.screens : []
 
     delegate: Component {
       DragGhostPanel {
@@ -1012,7 +1025,7 @@ Item {
   }
 
   Variants {
-    model: Quickshell.screens
+    model: root.hostReady ? Quickshell.screens : []
 
     delegate: Component {
       BarMoveGhostPanel {
