@@ -59,10 +59,7 @@ Item {
     "omarchy.system-update",
     "omarchy.monitor"
   ]
-  readonly property var secondaryWidgetIds: {
-    var configured = barConfig ? barConfig.secondaryWidgets : null
-    return Array.isArray(configured) ? configured : defaultSecondaryWidgetIds
-  }
+  property var secondaryWidgetIds: defaultSecondaryWidgetIds.slice()
   // One bar surface exists per monitor and each reports into this count, so a
   // pointer crossing from one monitor's bar to another's stays counted however
   // the enter and leave interleave. A single shared bool would be left false by
@@ -397,6 +394,12 @@ Item {
     position = normalizePosition(config.position)
     setRequestedTransparency(config.transparent === true)
     centerAnchor = Util.canonicalWidgetId(config.centerAnchor || "")
+
+    var requestedSecondaryWidgetIds = Array.isArray(config.secondaryWidgets)
+      ? config.secondaryWidgets : defaultSecondaryWidgetIds
+    var stableSecondaryWidgetIds = BarModel.stableArray(secondaryWidgetIds, requestedSecondaryWidgetIds)
+    if (stableSecondaryWidgetIds !== secondaryWidgetIds)
+      secondaryWidgetIds = stableSecondaryWidgetIds
 
     // layoutEntries feeds plain JS arrays to the module Repeaters, and QML
     // cannot diff those: reassigning layoutConfig rebuilds every widget on

@@ -93,6 +93,7 @@ retains the host's widget and panel contracts. Validate a checkout with:
 
 ```bash
 omarchy plugin validate .
+node --test BarModel.test.mjs
 ```
 
 The plugin targets Omarchy 4.0. Changes to the upstream bar engine may need to

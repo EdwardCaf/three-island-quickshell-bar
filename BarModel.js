@@ -65,6 +65,21 @@ function entriesAfter(entries, name) {
   return index === -1 ? [] : entries.slice(index + 1)
 }
 
+function stableArray(current, next) {
+  var requested = Array.isArray(next) ? next : []
+  if (Array.isArray(current) && current.length === requested.length) {
+    var unchanged = true
+    for (var i = 0; i < current.length; i++) {
+      if (current[i] !== requested[i]) {
+        unchanged = false
+        break
+      }
+    }
+    if (unchanged) return current
+  }
+  return requested.slice()
+}
+
 // A shell.json write that only changes inline widget settings (the battery
 // percentage toggle, a clock format change) must not rebuild the bar.
 // Compare two normalized layouts: when the structure is unchanged — same
@@ -222,6 +237,7 @@ if (typeof module !== "undefined") {
     entryIndex: entryIndex,
     entriesBefore: entriesBefore,
     entriesAfter: entriesAfter,
+    stableArray: stableArray,
     inlineSettingsDelta: inlineSettingsDelta,
     expandPath: expandPath,
     customModuleSafeName: customModuleSafeName,
