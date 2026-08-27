@@ -45,7 +45,6 @@ Item {
   property bool requestedTransparent: false
   property bool useTransparentForeground: false
   property bool transparent: false
-  property bool centerSectionHovered: false
   property int statusHoverCount: 0
   property bool statusPinned: true
   readonly property bool statusRevealed: statusPinned || statusHoverCount > 0
@@ -60,15 +59,6 @@ Item {
     "omarchy.monitor"
   ]
   property var secondaryWidgetIds: defaultSecondaryWidgetIds.slice()
-  // One bar surface exists per monitor and each reports into this count, so a
-  // pointer crossing from one monitor's bar to another's stays counted however
-  // the enter and leave interleave. A single shared bool would be left false by
-  // whichever event landed last.
-  property int barHoverCount: 0
-  // True while the pointer is over any bar, widgets included.
-  readonly property bool barHovered: barHoverCount > 0
-  property bool centerSectionRevealHeld: false
-  property bool centerHoverRevealSuppressed: false
   property int barConfigSerial: 0
   property string position: "top"
   // Resolves through fontconfig at paint time (Style.font.family defaults
@@ -83,6 +73,8 @@ Item {
   property color foreground: themeForeground
   property color barForeground: useTransparentForeground ? transparentForeground : themeForeground
   property bool foregroundAnimationEnabled: true
+  property bool transparentRefreshPending: false
+  property bool barHiddenProbePending: false
   property color background: Color.bar.background
   property color urgent: Color.bar.active
 
@@ -140,6 +132,22 @@ Item {
     moduleSlots = next
   }
 
+  function customCommandProducer(commandKey) {
+    for (var i = 0; i < moduleSlots.length; i++) {
+      var item = moduleSlots[i] ? moduleSlots[i].activeItem : null
+      if (item && item.commandKey === commandKey && typeof item.receiveCommandResult === "function") return item
+    }
+    return null
+  }
+
+  function publishCommandResult(commandKey, raw, error) {
+    for (var i = 0; i < moduleSlots.length; i++) {
+      var item = moduleSlots[i] ? moduleSlots[i].activeItem : null
+      if (!item || item.commandKey !== commandKey || typeof item.receiveCommandResult !== "function") continue
+      item.receiveCommandResult(raw, error)
+    }
+  }
+
   function debugBarGeometry() {
     var out = []
     for (var i = 0; i < moduleSlots.length; i++) {
@@ -177,6 +185,24 @@ Item {
   function slotWindow(slot) {
     if (!slot) return null
     return targetWindow(slot.activeItem) || targetWindow(slot)
+  }
+
+  function slotPainted(slot) {
+    if (!slot || slot.visible !== true || slot.width <= 0 || slot.height <= 0) return false
+    var ancestor = slot.parent
+    while (ancestor) {
+      if (ancestor.clip === true) {
+        try {
+          var point = slot.mapToItem(ancestor, 0, 0)
+          if (point.x + slot.width <= 0 || point.y + slot.height <= 0 ||
+              point.x >= ancestor.width || point.y >= ancestor.height) return false
+        } catch (e) {
+          return false
+        }
+      }
+      ancestor = ancestor.parent
+    }
+    return true
   }
 
   function sameWindow(left, right) {
@@ -423,6 +449,7 @@ Item {
       for (var s = 0; s < moduleSlots.length; s++) {
         var slot = moduleSlots[s]
         if (!slot || slot.region !== change.region || slot.moduleName !== entryId(change.entry)) continue
+        slot.entry = change.entry
         var item = slot.activeItem
         if (item && "settings" in item) item.settings = settings
       }
@@ -450,7 +477,7 @@ Item {
         if (!slot || slot.region !== region || slot.moduleName !== id) continue
         if (window && !sameWindow(slotWindow(slot), window)) continue
         var item = slot.activeItem
-        if (!item || item.visible !== true || slot.visible !== true || slot.width <= 0 || slot.height <= 0) continue
+        if (!item || item.visible !== true || !slotPainted(slot)) continue
         if (typeof item.open !== "function" || typeof item.close !== "function" || item.opened === undefined) continue
         slots.push(slot)
         break
@@ -547,6 +574,7 @@ Item {
       var slot = moduleSlots[i]
       if (!slot || !slot.activeItem) continue
       if (slot.moduleName !== id) continue
+      if (!slotPainted(slot)) continue
       var item = slot.activeItem
       if (typeof item.open !== "function" || typeof item.close !== "function" || item.opened === undefined) continue
       candidates.push({ slot: slot, screenName: slotScreenName(slot), opened: item.opened === true })
@@ -592,6 +620,10 @@ Item {
     return BarModel.entryIndex(entries, name)
   }
 
+  function entryCount(entries, name) {
+    return BarModel.entryCount(entries, name)
+  }
+
   function entriesBefore(entries, name) {
     return BarModel.entriesBefore(entries, name)
   }
@@ -616,9 +648,20 @@ Item {
     return BarModel.customModuleType(entry)
   }
 
-  function customModuleSource(entry) {
-    var source = BarModel.customModulePath(entry, home, omarchyConfigDir)
-    return source ? Util.fileUrl(source) : ""
+  function explicitCustomModuleType(entry) {
+    return BarModel.explicitCustomModuleType(entry)
+  }
+
+  function finiteNumber(value, fallback, minimum, maximum) {
+    return BarModel.finiteNumber(value, fallback, minimum, maximum)
+  }
+
+  function customModulePath(entry) {
+    return BarModel.customModulePath(entry, home, omarchyConfigDir)
+  }
+
+  function resolvedModulePath(relativePath) {
+    return BarModel.resolvedModulePath(relativePath, omarchyConfigDir)
   }
 
   function scheduleHostReady() {
@@ -633,33 +676,6 @@ Item {
   Component.onCompleted: {
     applyBarConfig()
     scheduleHostReady()
-  }
-
-  // Revealing the indicators widens their section, which can slide a neighbour
-  // under a stationary pointer. Collapsing on that un-hover would move it back
-  // out and re-open the peek, so hold until the pointer leaves the bar.
-  function setCenterSectionHovered(hovered) {
-    centerSectionHovered = hovered
-    if (hovered) {
-      centerSectionRevealTimer.stop()
-      centerSectionRevealHeld = true
-    } else {
-      centerSectionRevealTimer.restart()
-    }
-  }
-
-  function setBarHovered(hovered) {
-    barHoverCount = Math.max(0, barHoverCount + (hovered ? 1 : -1))
-    if (barHoverCount === 0) centerSectionRevealTimer.restart()
-  }
-
-  Timer {
-    id: centerSectionRevealTimer
-    interval: 120
-    // Collapse only. Opening the peek is the center section's own gesture, done
-    // in setCenterSectionHovered, so a timer left pending by a pointer that dipped
-    // off the bar and came back cannot reveal indicators it never pointed at.
-    onTriggered: if (!root.centerSectionHovered && !root.barHovered) root.centerSectionRevealHeld = false
   }
 
   function run(command) {
@@ -746,7 +762,8 @@ Item {
     var candidates = []
     for (var i = 0; i < moduleSlots.length; i++) {
       var slot = moduleSlots[i]
-      if (!slot || slot === sourceSlot || !slot.visible || slot.width <= 0 || slot.height <= 0) continue
+      if (!slot || slot === sourceSlot || !root.slotPainted(slot)) continue
+      if (root.entryCount(root.layoutEntries(slot.region), slot.moduleName) !== 1) continue
       if (sourceWindow && !root.sameWindow(root.slotWindow(slot), sourceWindow)) continue
 
       var slotPoint = { x: slot.x, y: slot.y }
@@ -772,7 +789,7 @@ Item {
     for (var i = 0; i < moduleSlots.length; i++) {
       var slot = moduleSlots[i]
       if (!slot || slot === sourceSlot || slot.region !== region || slot.moduleName !== name ||
-          !slot.visible || slot.width <= 0 || slot.height <= 0) continue
+          !root.slotPainted(slot)) continue
       if (sourceWindow && !root.sameWindow(root.slotWindow(slot), sourceWindow)) continue
       return slot
     }
@@ -817,6 +834,9 @@ Item {
     for (var i = clickTargets.length - 1; i >= 0; i--) {
       var target = clickTargets[i]
       if (!moduleTargetClickable(target)) continue
+      var slotTargetWindow = slotWindow(slot)
+      var clickTargetWindow = targetWindow(target)
+      if (slotTargetWindow && clickTargetWindow && !sameWindow(slotTargetWindow, clickTargetWindow)) continue
 
       var targetPoint = { x: localX, y: localY }
       try {
@@ -878,12 +898,18 @@ Item {
       transparentForeground = themeForeground
       return
     }
+    transparentRefreshPending = true
     transparentForegroundTimer.restart()
   }
 
   function refreshTransparentForeground() {
-    if (!requestedTransparent || transparentForegroundProc.running) return
+    if (!requestedTransparent) return
+    if (transparentForegroundProc.running) {
+      transparentRefreshPending = true
+      return
+    }
 
+    transparentRefreshPending = false
     transparentForegroundProc.command = [
       "omarchy-bar-text-color",
       root.position,
@@ -908,8 +934,10 @@ Item {
 
   Process {
     id: transparentForegroundProc
+    onExited: if (root.transparentRefreshPending) root.transparentForegroundTimer.restart()
     stdout: SplitParser {
       onRead: function(line) {
+        if (root.transparentRefreshPending) return
         var value = String(line || "").trim()
         if (!/^#[0-9A-Fa-f]{6}$/.test(value)) return
 
@@ -929,11 +957,6 @@ Item {
     watchChanges: true
     printErrors: false
     onFileChanged: root.scheduleTransparentForegroundRefresh()
-  }
-
-  function runProcess(process) {
-    if (!process.running)
-      process.running = true
   }
 
   function showTooltip(target, text) {
@@ -994,12 +1017,20 @@ Item {
     running: true
     command: ["bash", "-c", "[[ -f $HOME/.local/state/omarchy/toggles/bar-off ]] && echo yes || echo no"]
     stdout: SplitParser { onRead: function(line) { root.barHidden = String(line).trim() === "yes" } }
+    onExited: {
+      if (!root.barHiddenProbePending) return
+      root.barHiddenProbePending = false
+      running = true
+    }
   }
   FileView {
     path: root.home + "/.local/state/omarchy/toggles"
     watchChanges: true
     printErrors: false
-    onFileChanged: barHiddenProbe.running = true
+    onFileChanged: {
+      if (barHiddenProbe.running) root.barHiddenProbePending = true
+      else barHiddenProbe.running = true
+    }
   }
 
   Variants {
@@ -1081,15 +1112,6 @@ Item {
       anchors.fill: parent
       sourceComponent: root.vertical ? verticalBar : horizontalBar
 
-      // A child of the loader, not a sibling of the sections: an ancestor stays
-      // hovered while the pointer is over a widget, where a sibling would lose
-      // hover to the section the pointer entered.
-      HoverHandler {
-        onHoveredChanged: root.setBarHovered(hovered)
-        // Unplugging a monitor destroys its bar without a leave event, which
-        // would strand this surface's tally and hold the peek open for good.
-        Component.onDestruction: if (hovered) root.setBarHovered(false)
-      }
     }
 
     PopupWindow {
@@ -1160,13 +1182,16 @@ Item {
 
       Item {
         anchors.fill: parent
+        readonly property real centerLimit: Math.max(1, width * 0.5)
+        readonly property real sideLimit: Math.max(1, (width - centerIsland.width) / 2 - Style.space(12))
 
         BorderSurface {
           anchors.left: parent.left
           anchors.leftMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
-          width: leftModules.implicitWidth + root.islandPadding * 2
+          width: Math.min(leftModules.implicitWidth + root.islandPadding * 2, parent.sideLimit)
           height: root.islandHeight
+          clip: true
           color: root.transparent ? "transparent" : root.background
           borderSpec: Border.flat(Util.alpha(root.barForeground, 0.2), Style.spacing.hairline)
           radius: height / 2
@@ -1178,18 +1203,19 @@ Item {
         }
 
         BorderSurface {
+          id: centerIsland
+
           anchors.centerIn: parent
-          width: centerModules.implicitWidth + root.islandPadding * 2
+          width: Math.min(centerModules.implicitWidth + root.islandPadding * 2, parent.centerLimit)
           height: root.islandHeight
+          clip: true
           color: root.transparent ? "transparent" : root.background
           borderSpec: Border.flat(Util.alpha(root.barForeground, 0.2), Style.spacing.hairline)
           radius: height / 2
 
-          ModuleList {
+          CenterModules {
             id: centerModules
-            entries: root.layoutEntries("center")
-            region: "center"
-            anchors.centerIn: parent
+            anchors.fill: parent
           }
         }
 
@@ -1199,8 +1225,9 @@ Item {
           anchors.right: parent.right
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
-          width: statusContent.implicitWidth + root.islandPadding * 2
+          width: Math.min(statusContent.implicitWidth + root.islandPadding * 2, parent.sideLimit)
           height: root.islandHeight
+          clip: true
           color: root.transparent ? "transparent" : root.background
           borderSpec: Border.flat(Util.alpha(root.barForeground, 0.2), Style.spacing.hairline)
           radius: height / 2
@@ -1431,8 +1458,11 @@ Item {
     property var entries: root.layoutEntries("center")
     readonly property bool hasAnchor: root.entryIndex(entries, root.centerAnchor) !== -1
     readonly property var anchorEntry: root.findCenterAnchorEntry()
+    implicitWidth: centerLoader.item ? centerLoader.item.implicitWidth : 0
+    implicitHeight: centerLoader.item ? centerLoader.item.implicitHeight : 0
 
     Loader {
+      id: centerLoader
       anchors.fill: parent
       sourceComponent: root.vertical ? verticalCenterModules : horizontalCenterModules
     }
@@ -1442,14 +1472,15 @@ Item {
 
       Item {
         anchors.fill: parent
+        implicitWidth: centerRoot.hasAnchor
+          ? centerAnchorModule.implicitWidth + 2 * Math.max(beforeModules.implicitWidth, afterModules.implicitWidth)
+          : allModules.implicitWidth
+        implicitHeight: root.barSize
 
         CenterGestureArea { anchors.fill: parent }
 
-        HoverHandler {
-          onHoveredChanged: root.setCenterSectionHovered(hovered)
-        }
-
         ModuleList {
+          id: allModules
           visible: !centerRoot.hasAnchor
           entries: centerRoot.entries
           region: "center"
@@ -1457,6 +1488,7 @@ Item {
         }
 
         ModuleList {
+          id: beforeModules
           visible: centerRoot.hasAnchor
           entries: root.entriesBefore(centerRoot.entries, root.centerAnchor)
           region: "center"
@@ -1473,6 +1505,7 @@ Item {
         }
 
         ModuleList {
+          id: afterModules
           visible: centerRoot.hasAnchor
           entries: root.entriesAfter(centerRoot.entries, root.centerAnchor)
           region: "center"
@@ -1489,10 +1522,6 @@ Item {
         anchors.fill: parent
 
         CenterGestureArea { anchors.fill: parent }
-
-        HoverHandler {
-          onHoveredChanged: root.setCenterSectionHovered(hovered)
-        }
 
         ModuleList {
           visible: !centerRoot.hasAnchor
@@ -1588,6 +1617,8 @@ Item {
       root.clearBarMove()
     }
 
+    Component.onDestruction: if (dragging) root.clearBarMove()
+
     onClicked: function(mouse) {
       if (suppressClick) {
         suppressClick = false
@@ -1669,21 +1700,26 @@ Item {
     readonly property string moduleName: root.entryId(entry)
     readonly property var moduleSettings: root.entrySettings(entry)
     readonly property string customType: root.customModuleType(entry)
+    readonly property string explicitCustomType: root.explicitCustomModuleType(entry)
     // Re-evaluate when the registry mutates (Component reference changes,
     // plugin enabled/disabled, etc.). Reading the `widgets` property creates
     // the binding dependency — the wrapped function call alone wouldn't.
     readonly property var registryComponent: {
-      var w = root.barWidgetRegistry.widgets
-      if (customType) return null
+      var w = root.barWidgetRegistry && root.barWidgetRegistry.widgets ? root.barWidgetRegistry.widgets : ({})
+      if (explicitCustomType) return null
       var registryName = root.canonicalWidgetId(moduleName)
       return w[registryName] ? w[registryName].component : null
     }
     readonly property bool qmlCustom: customType === "qml"
     readonly property bool commandCustom: customType === "command"
     readonly property bool registered: registryComponent !== null
+    readonly property string requestedQmlPath: qmlCustom ? root.customModulePath(entry) : ""
+    readonly property bool allowExternalQml: moduleSettings.allowExternalSource === true
+    property string resolvedQmlPath: ""
+    property bool qmlResolutionPending: false
     readonly property var activeItem: {
       if (registered) return registryLoader.item
-      if (qmlCustom) return qmlLoader.item
+      if (qmlCustom) return qmlLoader.item || qmlErrorItem
       return componentLoader.item
     }
     readonly property bool hovered: moduleHover.hovered
@@ -1705,10 +1741,31 @@ Item {
     height: implicitHeight
     z: modulePointer.dragging ? 100 : 0
 
-    Component.onCompleted: root.registerModuleSlot(slot)
+    Component.onCompleted: {
+      root.registerModuleSlot(slot)
+      resolveQmlPath()
+    }
     Component.onDestruction: {
       if (root.barDragSource === slot) root.clearBarDrag()
       root.unregisterModuleSlot(slot)
+    }
+    onRequestedQmlPathChanged: resolveQmlPath()
+    onAllowExternalQmlChanged: resolveQmlPath()
+
+    function resolveQmlPath() {
+      resolvedQmlPath = ""
+      qmlResolutionPending = false
+      if (!qmlCustom || !requestedQmlPath) return
+      if (allowExternalQml) {
+        resolvedQmlPath = requestedQmlPath
+        return
+      }
+      qmlResolutionPending = true
+      qmlPathResolver.command = [
+        "realpath", "--canonicalize-existing", "--relative-base",
+        root.omarchyConfigDir + "/bar/modules", "--", requestedQmlPath
+      ]
+      qmlPathResolver.running = true
     }
 
     HoverHandler { id: moduleHover }
@@ -1750,13 +1807,35 @@ Item {
     Loader {
       id: qmlLoader
       active: slot.qmlCustom
-      source: slot.qmlCustom ? root.customModuleSource(slot.entry) : ""
+      source: slot.resolvedQmlPath ? Util.fileUrl(slot.resolvedQmlPath) : ""
       anchors.fill: parent
       opacity: slot.dragSource ? 0.22 : 1.0
       onLoaded: {
         slot.injectProps()
         Qt.callLater(slot.injectProps)
       }
+    }
+
+    Process {
+      id: qmlPathResolver
+      stdout: SplitParser {
+        onRead: function(line) {
+          var path = root.resolvedModulePath(line)
+          if (path) slot.resolvedQmlPath = path
+        }
+      }
+      onExited: slot.qmlResolutionPending = false
+    }
+
+    WidgetButton {
+      id: qmlErrorItem
+      visible: slot.qmlCustom && !slot.qmlResolutionPending &&
+        (qmlLoader.source === "" || qmlLoader.status === Loader.Error)
+      text: "!"
+      tooltipText: qmlLoader.source === ""
+        ? "Custom QML source is outside the allowed module directory"
+        : "Custom QML module failed to load"
+      fixedWidth: root.barSize
     }
 
     Rectangle {
@@ -1794,7 +1873,8 @@ Item {
       property bool suppressClick: false
       property real pressedX: 0
       property real pressedY: 0
-      readonly property bool canReorder: root.shell && typeof root.shell.mutateShellConfig === "function"
+      readonly property bool canReorder: root.shell && typeof root.shell.mutateShellConfig === "function" &&
+        root.entryCount(root.layoutEntries(slot.region), slot.moduleName) === 1
       readonly property real dragThreshold: Style.space(4)
 
       anchors.fill: parent
@@ -1894,7 +1974,7 @@ Item {
 
     Component {
       id: customCommandModuleComponent
-      CustomCommandModule { entry: slot.entry }
+      CustomCommandModule { entry: slot.entry; region: slot.region }
     }
   }
 
@@ -1902,11 +1982,22 @@ Item {
     id: customRoot
 
     required property var entry
+    property string region: ""
     readonly property string moduleName: root.entryId(entry)
     readonly property var settings: root.entrySettings(entry)
     property string outputText: ""
     property string outputTooltip: ""
     property bool outputActive: false
+    property string processOutput: ""
+    property bool processOverflow: false
+    property bool processTimedOut: false
+    property bool processCanceled: false
+    readonly property int maxOutputChars: 65536
+    readonly property string commandKey: region + "\n" + JSON.stringify(entry)
+    readonly property bool pollingProducer: root.customCommandProducer(commandKey) === customRoot
+    readonly property bool pollingEnabled: String(setting("exec", "")) !== "" &&
+      pollingProducer && !root.barHidden &&
+      (region !== "right" || !root.isSecondaryWidget(entry) || root.statusRevealed)
 
     function setting(name, fallback) {
       var value = settings ? settings[name] : undefined
@@ -1915,11 +2006,47 @@ Item {
 
     function update(raw) {
       var data = Util.parseModuleJson(raw)
+      if (!data || typeof data !== "object" || Array.isArray(data)) data = ({})
       var klass = data.class || data.alt || ""
 
-      outputText = data.text || String(raw || "").trim()
-      outputTooltip = data.tooltip || String(setting("tooltip", ""))
+      outputText = String(data.text === undefined || data.text === null ? String(raw || "").trim() : data.text).substring(0, 4096)
+      outputTooltip = String(data.tooltip === undefined || data.tooltip === null ? setting("tooltip", "") : data.tooltip).substring(0, 4096)
       outputActive = klass === "active" || (Array.isArray(klass) && klass.indexOf("active") !== -1)
+    }
+
+    function startProcess() {
+      if (!pollingEnabled || customProc.running) return
+      processOutput = ""
+      processOverflow = false
+      processTimedOut = false
+      processCanceled = false
+      customProc.running = true
+    }
+
+    function receiveCommandResult(raw, error) {
+      if (error) outputTooltip = error
+      else update(raw)
+    }
+
+    function acceptOutput(value) {
+      if (processOverflow) return
+      var chunk = String(value || "")
+      var remaining = maxOutputChars - processOutput.length
+      if (chunk.length > remaining) {
+        processOutput += chunk.substring(0, Math.max(0, remaining))
+        processOverflow = true
+        customProc.running = false
+        commandKillTimer.restart()
+        return
+      }
+      processOutput += chunk
+    }
+
+    onPollingEnabledChanged: {
+      if (pollingEnabled || !customProc.running) return
+      processCanceled = true
+      customProc.running = false
+      commandKillTimer.restart()
     }
 
     bar: root
@@ -1927,9 +2054,9 @@ Item {
     tooltipText: outputTooltip || String(setting("tooltip", ""))
     active: outputActive
     keepSpace: setting("keepSpace", false) === true
-    horizontalMargin: Number(setting("horizontalMargin", 7.5))
-    verticalPadding: Number(setting("verticalPadding", 6))
-    fontSize: Number(setting("fontSize", 12))
+    horizontalMargin: root.finiteNumber(setting("horizontalMargin", 7.5), 7.5, 0, 64)
+    verticalPadding: root.finiteNumber(setting("verticalPadding", 6), 6, 0, 64)
+    fontSize: root.finiteNumber(setting("fontSize", 12), 12, 6, 96)
 
     onPressed: function(button) {
       var command = ""
@@ -1945,19 +2072,56 @@ Item {
 
     Process {
       id: customProc
-      command: ["bash", "-lc", String(customRoot.setting("exec", ""))]
-      stdout: StdioCollector {
-        waitForEnd: true
-        onStreamFinished: customRoot.update(text)
+      command: [
+        "bash", "-c",
+        "setsid bash -lc \"$1\" & child=$!; trap 'kill -TERM -- -$child 2>/dev/null; sleep 1; kill -KILL -- -$child 2>/dev/null' TERM INT; wait \"$child\"; status=$?; trap - TERM INT; exit \"$status\"",
+        "bar-command", String(customRoot.setting("exec", ""))
+      ]
+      stdout: SplitParser {
+        splitMarker: ""
+        onRead: function(data) { customRoot.acceptOutput(data) }
+      }
+      onStarted: commandTimeoutTimer.restart()
+      onExited: function(exitCode) {
+        commandTimeoutTimer.stop()
+        commandKillTimer.stop()
+        if (customRoot.processCanceled) {
+          customRoot.processCanceled = false
+        } else if (customRoot.processTimedOut) {
+          root.publishCommandResult(customRoot.commandKey, "", "Command timed out")
+        } else if (customRoot.processOverflow) {
+          root.publishCommandResult(customRoot.commandKey, "", "Command output exceeded 64 KiB")
+        } else if (exitCode === 0) {
+          root.publishCommandResult(customRoot.commandKey, customRoot.processOutput, "")
+        } else {
+          root.publishCommandResult(customRoot.commandKey, "", "Command failed with exit code " + exitCode)
+        }
       }
     }
 
     Timer {
-      interval: Math.max(1, Number(customRoot.setting("interval", 5))) * 1000
-      running: String(customRoot.setting("exec", "")) !== ""
+      id: commandTimeoutTimer
+      interval: root.finiteNumber(customRoot.setting("timeout", 10), 10, 1, 60) * 1000
+      onTriggered: {
+        if (!customProc.running) return
+        customRoot.processTimedOut = true
+        customProc.running = false
+        commandKillTimer.restart()
+      }
+    }
+
+    Timer {
+      id: commandKillTimer
+      interval: 1500
+      onTriggered: if (customProc.running) customProc.signal(9)
+    }
+
+    Timer {
+      interval: root.finiteNumber(customRoot.setting("interval", 5), 5, 1, 86400) * 1000
+      running: customRoot.pollingEnabled
       repeat: true
       triggeredOnStart: true
-      onTriggered: root.runProcess(customProc)
+      onTriggered: customRoot.startProcess()
     }
   }
 }

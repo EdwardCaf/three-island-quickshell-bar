@@ -44,7 +44,8 @@ merge the `bar` object from [`examples/shell.json`](examples/shell.json) into
 The right island starts expanded, so every configured widget is visible.
 Click the `-` control to collapse entries listed in `secondaryWidgets`; hovering
 the island reveals them temporarily. Secondary entries stay mounted while
-collapsed, preserving panel routing and background refresh behavior.
+collapsed, preserving panel routing. Polling custom commands pause while hidden
+or collapsed and resume when visible; one producer supplies all monitor copies.
 
 Configure the drawer in the `bar` object:
 
@@ -98,6 +99,22 @@ node --test BarModel.test.mjs
 
 The plugin targets Omarchy 4.0. Changes to the upstream bar engine may need to
 be merged into `Bar.qml` and `BarModel.js` after future Omarchy releases.
+
+## Custom Module Security
+
+Custom module configuration is trusted code. An `exec` value runs through
+`bash -lc`, click-command fields execute programs, and QML modules run with the
+same user access as Quickshell. Do not import these values from an untrusted
+preset or expose unrestricted bar configuration writes over IPC.
+
+QML sources are confined to `~/.config/omarchy/bar/modules/` by default.
+Setting `allowExternalSource` to `true` permits an explicit path outside that
+directory and should only be used for locally reviewed code. This path check is
+resolved through `realpath`, so symlinks cannot escape the module directory
+unless that override is enabled. All files within the module directory must
+still be trusted. Command output is limited to 64 KiB and command execution
+defaults to a 10-second timeout; set a finite `timeout` from 1 to 60 seconds
+when a module needs a different limit.
 
 ## Attribution
 

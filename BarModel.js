@@ -27,16 +27,16 @@ function entryId(entry) {
 }
 
 function pinTrayToInner(entries, section) {
-  var trayEntry = null
+  var trayEntries = []
   var result = []
   var values = Array.isArray(entries) ? entries : []
   for (var i = 0; i < values.length; i++) {
-    if (entryId(values[i]) === "omarchy.tray") trayEntry = values[i]
+    if (entryId(values[i]) === "omarchy.tray") trayEntries.push(values[i])
     else result.push(values[i])
   }
-  if (trayEntry) {
-    if (section === "right") result.unshift(trayEntry)
-    else result.push(trayEntry)
+  if (trayEntries.length > 0) {
+    if (section === "right") result = trayEntries.concat(result)
+    else result = result.concat(trayEntries)
   }
   return result
 }
@@ -53,6 +53,15 @@ function entryIndex(entries, name) {
     if (entryId(entries[i]) === name) return i
   }
   return -1
+}
+
+function entryCount(entries, name) {
+  if (!Array.isArray(entries)) return 0
+  var count = 0
+  for (var i = 0; i < entries.length; i++) {
+    if (entryId(entries[i]) === name) count++
+  }
+  return count
 }
 
 function entriesBefore(entries, name) {
@@ -132,19 +141,65 @@ function customModuleSafeName(name) {
 function customModuleType(entry) {
   var settings = entrySettings(entry)
   var type = String(settings.type || "")
-  if (type) return type
+  if (type === "command" || type === "qml") return type
   if (settings.exec) return "command"
   if (settings.source) return "qml"
   return ""
 }
 
+function explicitCustomModuleType(entry) {
+  var type = String(entrySettings(entry).type || "")
+  return type === "command" || type === "qml" ? type : ""
+}
+
+function finiteNumber(value, fallback, minimum, maximum) {
+  var parsed = Number(value)
+  var safeFallback = Number(fallback)
+  if (!isFinite(safeFallback)) safeFallback = 0
+  if (!isFinite(parsed)) parsed = safeFallback
+  if (isFinite(Number(minimum))) parsed = Math.max(Number(minimum), parsed)
+  if (isFinite(Number(maximum))) parsed = Math.min(Number(maximum), parsed)
+  return parsed
+}
+
+function normalizedPath(value) {
+  var path = String(value || "")
+  var absolute = path[0] === "/"
+  var parts = path.split("/")
+  var result = []
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i]
+    if (!part || part === ".") continue
+    if (part === "..") {
+      if (result.length === 0) return ""
+      result.pop()
+    } else {
+      result.push(part)
+    }
+  }
+  return (absolute ? "/" : "") + result.join("/")
+}
+
 function customModulePath(entry, home, configDir) {
   var settings = entrySettings(entry)
   var name = entryId(entry)
+  var moduleDir = normalizedPath(String(configDir || "") + "/bar/modules")
   var source = settings.source ? expandPath(settings.source, home) : ""
+  if (source && source[0] !== "/") source = moduleDir + "/" + source
+  source = normalizedPath(source)
+  if (source && settings.allowExternalSource !== true &&
+      source !== moduleDir && source.indexOf(moduleDir + "/") !== 0)
+    return ""
   if (!source && customModuleSafeName(name))
-    source = String(configDir || "") + "/bar/modules/" + String(name) + ".qml"
+    source = moduleDir + "/" + String(name) + ".qml"
   return source
+}
+
+function resolvedModulePath(relativePath, configDir) {
+  var relative = String(relativePath || "").trim()
+  if (!relative || relative[0] === "/" || /(^|\/)\.\.(\/|$)/.test(relative))
+    return ""
+  return normalizedPath(String(configDir || "") + "/bar/modules/" + relative)
 }
 
 // A center module is mounted twice once an anchor is set: the copy that is
@@ -235,6 +290,7 @@ if (typeof module !== "undefined") {
     pinTrayToInner: pinTrayToInner,
     moduleString: moduleString,
     entryIndex: entryIndex,
+    entryCount: entryCount,
     entriesBefore: entriesBefore,
     entriesAfter: entriesAfter,
     stableArray: stableArray,
@@ -242,6 +298,9 @@ if (typeof module !== "undefined") {
     expandPath: expandPath,
     customModuleSafeName: customModuleSafeName,
     customModuleType: customModuleType,
-    customModulePath: customModulePath
+    explicitCustomModuleType: explicitCustomModuleType,
+    customModulePath: customModulePath,
+    resolvedModulePath: resolvedModulePath,
+    finiteNumber: finiteNumber
   }
 }
