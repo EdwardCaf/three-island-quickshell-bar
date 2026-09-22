@@ -47,7 +47,7 @@ Item {
   property bool transparent: false
   property int statusHoverCount: 0
   property bool statusPinned: true
-  readonly property bool statusRevealed: statusPinned || statusHoverCount > 0
+  readonly property bool statusRevealed: true
   readonly property var defaultSecondaryWidgetIds: [
     "omarchy.tray",
     "omarchy.tailscale",
@@ -1267,17 +1267,6 @@ Item {
                 Behavior on opacity {
                   NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
                 }
-              }
-            }
-
-            WidgetButton {
-              bar: root
-              text: root.statusPinned ? "-" : "+"
-              fixedWidth: root.barSize
-              fontSize: Style.font.subtitle
-              tooltipText: root.statusPinned ? "Collapse status" : "Pin status open"
-              onPressed: function(button) {
-                if (button === Qt.LeftButton) root.statusPinned = !root.statusPinned
               }
             }
 
